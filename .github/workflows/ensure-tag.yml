@@ -1,0 +1,53 @@
+name: Ensure tag exists
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  ensure-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get package versions
+        id: versions
+        run: |
+          SYSTEM=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+          TL_RAW=$(nix eval ".#devShells.${SYSTEM}.default.nativeBuildInputs" \
+            --apply "bi: (builtins.elemAt bi 0).version" --raw)
+          GS_RAW=$(nix eval ".#devShells.${SYSTEM}.default.nativeBuildInputs" \
+            --apply "bi: (builtins.elemAt bi 1).version" --raw)
+          TL_VERSION=$(echo "$TL_RAW" | sed -E 's/-final-env$//; s/-env$//')
+          VERSION="v${TL_VERSION}+gs${GS_RAW}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: check
+        run: |
+          if git rev-parse "${{ steps.versions.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create missing tag and release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.versions.outputs.version }}"
+          git tag "$TAG"
+          git push origin "$TAG"
+          gh release create "$TAG" --generate-notes

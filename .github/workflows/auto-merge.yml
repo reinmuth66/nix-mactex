@@ -1,0 +1,73 @@
+name: Auto-merge and tag
+
+on:
+  workflow_run:
+    workflows: [check]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge-and-tag:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.pull_requests[0] != null
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Verify PR author and merge
+        run: |
+          author=$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.user.login')
+          if [[ "$author" != "dependabot[bot]" && "$author" != "github-actions[bot]" ]]; then
+            echo "Refusing to merge PR #$PR_NUMBER opened by $author"
+            exit 1
+          fi
+          gh pr merge "$PR_NUMBER" --repo "$REPOSITORY" --squash --delete-branch
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get package versions
+        id: versions
+        run: |
+          SYSTEM=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+          TL_RAW=$(nix eval ".#devShells.${SYSTEM}.default.nativeBuildInputs" \
+            --apply "bi: (builtins.elemAt bi 0).version" --raw)
+          GS_RAW=$(nix eval ".#devShells.${SYSTEM}.default.nativeBuildInputs" \
+            --apply "bi: (builtins.elemAt bi 1).version" --raw)
+          TL_VERSION=$(echo "$TL_RAW" | sed -E 's/-final-env$//; s/-env$//')
+          VERSION="v${TL_VERSION}+gs${GS_RAW}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: check
+        run: |
+          if git rev-parse "${{ steps.versions.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create tag and release
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          TAG="${{ steps.versions.outputs.version }}"
+          git tag "$TAG"
+          git push origin "$TAG"
+          gh release create "$TAG" --generate-notes
