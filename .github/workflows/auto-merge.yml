@@ -30,7 +30,7 @@ jobs:
           fi
           gh pr merge "$PR_NUMBER" --repo "$REPOSITORY" --squash --delete-branch
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
