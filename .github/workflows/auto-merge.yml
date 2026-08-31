@@ -24,7 +24,7 @@ jobs:
       - name: Verify PR author and merge
         run: |
           author=$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.user.login')
-          if [[ "$author" != "dependabot[bot]" && "$author" != "github-actions[bot]" ]]; then
+          if [[ "$author" != "dependabot[bot]" && "$author" != "github-actions[bot]" && "$author" != "reinmuth66" ]]; then
             echo "Refusing to merge PR #$PR_NUMBER opened by $author"
             exit 1
           fi

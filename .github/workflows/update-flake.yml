@@ -24,6 +24,7 @@ jobs:
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v8
         with:
+          token: ${{ secrets.GH_PAT }}
           commit-message: "chore: update flake inputs"
           title: "chore: update flake inputs"
           body: Automated flake inputs update by GitHub Actions.
